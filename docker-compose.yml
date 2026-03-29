@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    container_name: vascora-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vascora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-vascora}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  ingest-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: vascora-ingest-api
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
