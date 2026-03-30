@@ -1,154 +1,150 @@
-# MontKailash Cannabis — Market Intelligence Platform
+# Vascora
 
-> **Project Code:** Vascora
-> **Version:** 1.0.0 (POC)
-> **Target Market:** Burlington, Ontario, Canada — 35 km radius
-> **Data Refresh:** Daily automated pipeline
+Practical data ingestion and analytics API for cannabis market intelligence in Burlington, ON (35 km radius), built so Reddit integration can be added later without changing core workflows.
 
----
+## What Runs in This Repo
 
-## Overview
+- PostgreSQL database (raw + marts schemas)
+- FastAPI service for ingestion and analytics
+- Collector scripts for:
+    - AGCO stores
+    - Store products
+    - Product pricing
+    - OCS catalog
+- SQL marts refresh pipeline
+- CSV export endpoints for analytics outputs
 
-Vascora is a competitive-intelligence data platform built for **MontKailash Cannabis**. It automatically collects, transforms, and visualises cannabis retail data across all licensed stores within a 35 km radius of Burlington, ON — giving MontKailash a daily, data-driven view of:
+## Prerequisites
 
-- Which competitors are operating and where
-- What products are on shelf, at what prices, and when prices change
-- Which new OCS products are entering the local market
-- What public sentiment exists around specific brands and products on Reddit
+- Docker Desktop
+- Docker Compose v2
+- Git
+- Optional for collectors (if running on host instead of container): Python 3.11 + pip
 
----
+## 1) Configure Environment
 
-## Business Goals
-
-| Goal | Output |
-|---|---|
-| Know every competitor in the market | Enriched store list with owner/contact details |
-| Understand what products are trending | Cross-store product ubiquity matrix |
-| Track real-time pricing changes | Pricing time-series with volatility index |
-| Spot new products before competitors shelf them | OCS new-arrival tracker (< 30 days) |
-| Understand consumer sentiment | Reddit sentiment reports per brand/product |
-| Surface stocking opportunities | Sentiment–gap analysis report |
-
----
-
-## Architecture at a Glance
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    DATA SOURCES (External)                  │
-│  AGCO Registry │ Google Places │ Store Websites │ OCS       │
-│  HiBuddy.ca    │ Weedmaps      │ Reddit (PRAW)              │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Ingestion Layer (Scrapy + Playwright)
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│               PostgreSQL 16 + TimescaleDB                   │
-│  raw_stores │ raw_products │ pricing_history │ ocs_arrivals │
-│  sentiment_posts                                            │
-└────────────────────────┬────────────────────────────────────┘
-                         │ dbt Transformations
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Analytics Marts                          │
-│  mart_store_coverage │ mart_product_matrix                  │
-│  mart_price_volatility │ mart_sentiment_gap                 │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Streamlit Dashboard
-                         ▼
-                  localhost:8501
-```
-
----
-
-## Quick Start (3 Commands)
-
-**Prerequisites:** Docker Desktop installed and running, API keys configured (see [User Guide](docs/user-guide.md)).
+Copy template and edit values:
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/montkailash/vascora.git && cd vascora
-
-# 2. Configure environment variables
 cp .env.example .env
-# Edit .env with your API keys (see docs/user-guide.md § API Key Setup)
-
-# 3. Launch all services
-docker compose up -d
 ```
 
-| Service | URL | Credentials |
-|---|---|---|
-| Airflow UI (pipeline scheduler) | http://localhost:8080 | admin / admin |
-| Streamlit Dashboard | http://localhost:8501 | — |
-| PostgreSQL | localhost:5432 | See .env |
-
----
-
-## Implementation (Reddit Ready, Optional)
-
-The ingestion layer is fully usable without sentiment ingestion. It includes:
-
-- Store ingestion (`raw.agco_stores`)
-- Product ingestion (`raw.store_products`)
-- Pricing ingestion (`raw.product_pricing`)
-- OCS catalog ingestion (`raw.ocs_catalog`)
-
-### 1) Configure ingestion env values
-
-Set these values in `.env`:
+Minimum required values in `.env`:
 
 ```dotenv
-SENTIMENT_SOURCE=off
-INGEST_API_TOKEN=change_me_ingest_token
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=vascora
+POSTGRES_PASSWORD=change_me_to_a_strong_password
+POSTGRES_DB=vascora
+
 API_BASE_URL=http://localhost:8000
+INGEST_API_TOKEN=change_me_ingest_token
+
+BURLINGTON_LAT=43.3255
+BURLINGTON_LNG=-79.7990
+MARKET_RADIUS_KM=35
+
+# Keep sentiment off for now (Reddit can be enabled later)
+SENTIMENT_SOURCE=off
+DEVVIT_WEBHOOK_TOKEN=replace_with_shared_secret
+
+# Needed only if AGCO rows are missing lat/lng and geocoding is required
+GOOGLE_PLACES_API_KEY=AIza...your_key_here...
 ```
 
-### 2) Run AGCO collector (CSV -> API)
-
-Use the template at `data/samples/agco_stores_template.csv`, then run:
+## 2) Start Services
 
 ```bash
-PYTHONPATH=src python -m app.collectors.agco \
+docker compose up -d --build
+```
+
+Services:
+
+- API: http://localhost:8000
+- DB: localhost:5432
+
+Health check:
+
+```bash
+curl http://localhost:8000/healthz
+```
+
+Expected:
+
+```json
+{"status":"ok"}
+```
+
+## 3) Initialize Database Schema
+
+For first run on a clean DB volume, schema is auto-created from [sql/init.sql](sql/init.sql).
+
+If you already have an old DB volume and need to re-apply schema changes:
+
+```bash
+docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/init.sql
+```
+
+## 4) Ingest Data (Option A: One Command)
+
+Use sample files to validate the full pipeline quickly:
+
+```bash
+docker compose exec ingest-api python -m app.pipelines.run_all \
+    --agco-csv data/samples/agco_stores_template.csv \
+    --products-csv data/samples/store_products_template.csv \
+    --pricing-csv data/samples/product_pricing_template.csv \
+    --ocs-csv data/samples/ocs_catalog_template.csv
+```
+
+What this does:
+
+1. Ingest stores -> `raw.agco_stores`
+2. Ingest products -> `raw.store_products`
+3. Ingest pricing -> `raw.product_pricing`
+4. Ingest OCS catalog -> `raw.ocs_catalog`
+5. Refresh marts from raw data
+
+## 5) Ingest Data (Option B: Step by Step)
+
+### Stores
+
+```bash
+docker compose exec ingest-api python -m app.collectors.agco \
     --csv-path data/samples/agco_stores_template.csv
 ```
 
-The collector will:
-
-- Parse AGCO-like rows
-- Geocode missing lat/lng via Google Geocoding API (if key exists)
-- Compute Burlington distance and filter by `MARKET_RADIUS_KM`
-- Batch POST to `POST /ingest/stores` with `X-Api-Token`
-
-### 3) Run product/pricing/OCS collectors
+### Products
 
 ```bash
-# Product catalog -> /ingest/products
-PYTHONPATH=src python -m app.collectors.products \
+docker compose exec ingest-api python -m app.collectors.products \
     --csv-path data/samples/store_products_template.csv
+```
 
-# Pricing history -> /ingest/pricing
-PYTHONPATH=src python -m app.collectors.pricing \
+### Pricing
+
+```bash
+docker compose exec ingest-api python -m app.collectors.pricing \
     --csv-path data/samples/product_pricing_template.csv
+```
 
-# OCS catalog -> /ingest/ocs
-PYTHONPATH=src python -m app.collectors.ocs \
+### OCS Catalog
+
+```bash
+docker compose exec ingest-api python -m app.collectors.ocs \
     --csv-path data/samples/ocs_catalog_template.csv
 ```
 
-### 4) Build analytics marts from raw data
+### Refresh Marts
 
 ```bash
-PYTHONPATH=src python -m app.pipelines.refresh_marts
+docker compose exec ingest-api python -m app.pipelines.refresh_marts
 ```
 
-Or via API (protected by `X-Api-Token`):
+## 6) Query Analytics APIs
 
-```bash
-curl -X POST http://localhost:8000/analytics/refresh \
-    -H "X-Api-Token: $INGEST_API_TOKEN"
-```
-
-### 5) Query analytics outputs
+JSON endpoints:
 
 ```bash
 curl "http://localhost:8000/analytics/store-coverage?limit=50"
@@ -157,7 +153,14 @@ curl "http://localhost:8000/analytics/price-volatility?limit=50"
 curl "http://localhost:8000/analytics/new-arrivals?limit=50"
 ```
 
-### 6) Export analytics datasets as CSV
+Force marts refresh via API (protected):
+
+```bash
+curl -X POST http://localhost:8000/analytics/refresh \
+    -H "X-Api-Token: $INGEST_API_TOKEN"
+```
+
+## 7) Export CSV Outputs
 
 ```bash
 curl -L "http://localhost:8000/analytics/export/store-coverage?limit=5000" -o store-coverage.csv
@@ -166,99 +169,128 @@ curl -L "http://localhost:8000/analytics/export/price-volatility?limit=5000" -o 
 curl -L "http://localhost:8000/analytics/export/new-arrivals?limit=5000" -o new-arrivals.csv
 ```
 
-### 7) Run full ingestion + transform in one command
+## 8) Load Real Data Files
+
+Replace sample paths with your real files:
 
 ```bash
-PYTHONPATH=src python -m app.pipelines.run_all \
-    --agco-csv data/samples/agco_stores_template.csv \
-    --products-csv data/samples/store_products_template.csv \
-    --pricing-csv data/samples/product_pricing_template.csv \
-    --ocs-csv data/samples/ocs_catalog_template.csv
+docker compose exec ingest-api python -m app.collectors.agco --csv-path /app/data/agco.csv
+docker compose exec ingest-api python -m app.collectors.products --csv-path /app/data/products.csv
+docker compose exec ingest-api python -m app.collectors.pricing --csv-path /app/data/pricing.csv
+docker compose exec ingest-api python -m app.collectors.ocs --csv-path /app/data/ocs.csv
+docker compose exec ingest-api python -m app.pipelines.refresh_marts
 ```
 
----
+If you need these files available in container path `/app/data`, place them under workspace `data/` on host.
 
-## Documentation Index
+## 9) API Contract (Ingestion)
 
-| Document | Purpose |
-|---|---|
-| [docs/architecture.md](docs/architecture.md) | System design, module breakdown, data flow, folder structure |
-| [docs/data-sources.md](docs/data-sources.md) | All data sources, API access, rate limits, coverage notes |
-| [docs/data-dictionary.md](docs/data-dictionary.md) | Full database schema with column-level definitions |
-| [docs/analytics-spec.md](docs/analytics-spec.md) | Five analytics output specifications and business logic |
-| [docs/tools.md](docs/tools.md) | Full tooling list with versions and justification |
-| [docs/user-guide.md](docs/user-guide.md) | Step-by-step setup, operation, and troubleshooting guide |
+Protected ingestion endpoints use header:
 
----
+- `X-Api-Token: <INGEST_API_TOKEN>`
 
-## Burlington 35 km Coverage Area
+Endpoints:
 
-The pipeline automatically filters all discovered stores to those within **35 km** of Burlington city centre (43.3255° N, 79.7990° W). This typically includes:
+- `POST /ingest/stores`
+- `POST /ingest/products`
+- `POST /ingest/pricing`
+- `POST /ingest/ocs`
 
-- Burlington (core target)
-- Oakville
-- Hamilton (north-east)
-- Waterdown
-- Dundas / Ancaster
-- Milton (partial)
-- Stoney Creek
-- Grimsby (edge)
-- Mississauga (south-west edge)
+Each endpoint accepts JSON:
 
----
-
-## Repository Structure
-
-```
-vascora/
-├── README.md
-├── docker-compose.yml
-├── .env.example
-├── airflow/
-│   └── dags/
-│       ├── dag_store_discovery.py
-│       ├── dag_product_scrape.py
-│       ├── dag_pricing_sync.py
-│       ├── dag_ocs_tracker.py
-│       └── dag_reddit_sentiment.py
-├── scrapers/
-│   ├── agco/
-│   ├── google_places/
-│   ├── store_menus/
-│   │   ├── adapters/            # Per-POS-platform adapters (Dutchie, Jane, Cova)
-│   ├── ocs/
-│   ├── hibuddy/
-│   └── reddit/
-├── dbt/
-│   ├── models/
-│   │   ├── staging/
-│   │   └── marts/
-│   └── tests/
-├── dashboard/
-│   └── app.py
-└── docs/
-    ├── architecture.md
-    ├── data-sources.md
-    ├── data-dictionary.md
-    ├── analytics-spec.md
-    ├── tools.md
-    └── user-guide.md
+```json
+{
+    "records": [
+        {"...": "..."}
+    ]
+}
 ```
 
----
+## 10) Reddit Integration Later (Optional)
 
-## Legal & Compliance Notes
+Current setup is ready for future integration. To add later:
 
-- All scraping targets are **publicly accessible retail websites**. No login-walled data is collected.
-- All scrapers respect `robots.txt` and enforce a minimum **3-second delay** between requests per domain.
-- Reddit data is collected via the **official PRAW API** under Reddit's public data terms.
-- AGCO retailer data is publicly published by the Ontario government.
-- This platform does **not** store any personally identifiable customer data.
+1. Set `SENTIMENT_SOURCE=devvit_webhook`
+2. Configure `DEVVIT_WEBHOOK_TOKEN`
+3. Start sending payloads to `POST /ingest/reddit`
 
----
+No changes are required to existing collectors, marts, or exports.
 
-## Contact
+## 11) Troubleshooting
 
-**Client:** MontKailash Cannabis
-**Built by:** Vascora Data Engineering
-**Date:** March 2026
+### API not reachable
+
+```bash
+docker compose ps
+docker compose logs ingest-api
+```
+
+### Database schema missing after restart
+
+If using an existing DB volume, re-run schema manually (Step 3).
+
+### 401 on ingestion routes
+
+Ensure header token matches `INGEST_API_TOKEN` exactly.
+
+### Empty analytics results
+
+1. Confirm raw tables have data.
+2. Run marts refresh command.
+
+### Port conflicts
+
+If `5432` or `8000` is occupied, change host port mapping in [docker-compose.yml](docker-compose.yml).
+
+## Project References
+
+- [docs/user-guide.md](docs/user-guide.md)
+- [docs/data-dictionary.md](docs/data-dictionary.md)
+- [docs/analytics-spec.md](docs/analytics-spec.md)
+
+## 12) Interview Handover Checklist
+
+Use this checklist before submitting your exercise.
+
+### A. Technical completion
+
+- Services start successfully (`docker compose up -d --build`)
+- Ingestion runs without failures (one-command or step-by-step)
+- Marts refresh completes
+- Analytics endpoints return non-empty results
+- CSV export files are generated
+
+### B. Required business outputs
+
+- Competitor store list (name, address, phone, hours if available, licence holder)
+- Product catalog per store
+- Regular and sale pricing snapshots
+- New OCS arrivals and local availability gaps
+
+### C. Files to include in submission
+
+- `store-coverage.csv`
+- `product-matrix.csv`
+- `price-volatility.csv`
+- `new-arrivals.csv`
+- This README and docs folder
+
+### D. Scope declaration (recommended)
+
+If sentiment is deferred, state clearly:
+
+1. Current delivery includes ingestion, pricing intelligence, and OCS opportunity tracking.
+2. Reddit/Devvit ingestion is designed and endpoint-ready (`POST /ingest/reddit`) but intentionally deferred.
+
+## 13) Recommended Execution Sequence
+
+For repeatable runs, execute in this exact order:
+
+1. Start services
+2. Ingest stores
+3. Ingest products
+4. Ingest pricing
+5. Ingest OCS catalog
+6. Refresh marts
+7. Query analytics endpoints
+8. Export CSV outputs
