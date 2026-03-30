@@ -24,6 +24,9 @@ services:
       POSTGRES_PORT: 5432
     ports:
       - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro
+      - ./sql:/app/sql:ro
     depends_on:
       - db
 

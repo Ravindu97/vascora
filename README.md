@@ -83,7 +83,7 @@ For first run on a clean DB volume, schema is auto-created from [sql/init.sql](s
 If you already have an old DB volume and need to re-apply schema changes:
 
 ```bash
-docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/init.sql
+docker compose exec db psql -U vascora -d vascora -f /docker-entrypoint-initdb.d/init.sql
 ```
 
 ## 4) Ingest Data (Option A: One Command)
@@ -237,6 +237,19 @@ Ensure header token matches `INGEST_API_TOKEN` exactly.
 
 1. Confirm raw tables have data.
 2. Run marts refresh command.
+
+### FileNotFoundError for sample CSV or marts SQL
+
+If you see errors like `data/samples/...` or `sql/marts.sql` not found from `ingest-api`, ensure these mounts exist in [docker-compose.yml](docker-compose.yml):
+
+- `./data:/app/data:ro`
+- `./sql:/app/sql:ro`
+
+Then rebuild and restart:
+
+```bash
+docker compose up -d --build
+```
 
 ### Port conflicts
 
