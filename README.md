@@ -135,6 +135,47 @@ PYTHONPATH=src python -m app.collectors.ocs \
     --csv-path data/samples/ocs_catalog_template.csv
 ```
 
+### 4) Build analytics marts from raw data
+
+```bash
+PYTHONPATH=src python -m app.pipelines.refresh_marts
+```
+
+Or via API (protected by `X-Api-Token`):
+
+```bash
+curl -X POST http://localhost:8000/analytics/refresh \
+    -H "X-Api-Token: $INGEST_API_TOKEN"
+```
+
+### 5) Query analytics outputs
+
+```bash
+curl "http://localhost:8000/analytics/store-coverage?limit=50"
+curl "http://localhost:8000/analytics/product-matrix?limit=50"
+curl "http://localhost:8000/analytics/price-volatility?limit=50"
+curl "http://localhost:8000/analytics/new-arrivals?limit=50"
+```
+
+### 6) Export analytics datasets as CSV
+
+```bash
+curl -L "http://localhost:8000/analytics/export/store-coverage?limit=5000" -o store-coverage.csv
+curl -L "http://localhost:8000/analytics/export/product-matrix?limit=5000" -o product-matrix.csv
+curl -L "http://localhost:8000/analytics/export/price-volatility?limit=5000" -o price-volatility.csv
+curl -L "http://localhost:8000/analytics/export/new-arrivals?limit=5000" -o new-arrivals.csv
+```
+
+### 7) Run full ingestion + transform in one command
+
+```bash
+PYTHONPATH=src python -m app.pipelines.run_all \
+    --agco-csv data/samples/agco_stores_template.csv \
+    --products-csv data/samples/store_products_template.csv \
+    --pricing-csv data/samples/product_pricing_template.csv \
+    --ocs-csv data/samples/ocs_catalog_template.csv
+```
+
 ---
 
 ## Documentation Index
