@@ -84,6 +84,59 @@ docker compose up -d
 
 ---
 
+## Implementation (Reddit Ready, Optional)
+
+The ingestion layer is fully usable without sentiment ingestion. It includes:
+
+- Store ingestion (`raw.agco_stores`)
+- Product ingestion (`raw.store_products`)
+- Pricing ingestion (`raw.product_pricing`)
+- OCS catalog ingestion (`raw.ocs_catalog`)
+
+### 1) Configure ingestion env values
+
+Set these values in `.env`:
+
+```dotenv
+SENTIMENT_SOURCE=off
+INGEST_API_TOKEN=change_me_ingest_token
+API_BASE_URL=http://localhost:8000
+```
+
+### 2) Run AGCO collector (CSV -> API)
+
+Use the template at `data/samples/agco_stores_template.csv`, then run:
+
+```bash
+PYTHONPATH=src python -m app.collectors.agco \
+    --csv-path data/samples/agco_stores_template.csv
+```
+
+The collector will:
+
+- Parse AGCO-like rows
+- Geocode missing lat/lng via Google Geocoding API (if key exists)
+- Compute Burlington distance and filter by `MARKET_RADIUS_KM`
+- Batch POST to `POST /ingest/stores` with `X-Api-Token`
+
+### 3) Run product/pricing/OCS collectors
+
+```bash
+# Product catalog -> /ingest/products
+PYTHONPATH=src python -m app.collectors.products \
+    --csv-path data/samples/store_products_template.csv
+
+# Pricing history -> /ingest/pricing
+PYTHONPATH=src python -m app.collectors.pricing \
+    --csv-path data/samples/product_pricing_template.csv
+
+# OCS catalog -> /ingest/ocs
+PYTHONPATH=src python -m app.collectors.ocs \
+    --csv-path data/samples/ocs_catalog_template.csv
+```
+
+---
+
 ## Documentation Index
 
 | Document | Purpose |
